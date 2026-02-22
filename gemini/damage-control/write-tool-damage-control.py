@@ -3,15 +3,14 @@
 # dependencies = ["pyyaml"]
 # ///
 """
-Claude Code Edit Tool Damage Control
+Gemini CLI Write Tool Damage Control
 =====================================
 
-Blocks edits to protected files via PreToolUse hook on Edit tool.
+Blocks writes to protected files via BeforeTool hook on write_file tool.
 Loads zeroAccessPaths and readOnlyPaths from patterns.yaml.
 
 Exit codes:
-  0 = Allow edit
-  2 = Block edit (stderr fed back to Claude)
+  0 = Allow or deny via JSON {"decision": "allow"} / {"decision": "deny", "reason": "..."}
 """
 
 import json
@@ -19,14 +18,14 @@ import sys
 import os
 import fnmatch
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, Tuple
 
 import yaml
 
 
 def is_glob_pattern(pattern: str) -> bool:
     """Check if pattern contains glob wildcards."""
-    return '*' in pattern or '?' in pattern or '[' in pattern
+    return "*" in pattern or "?" in pattern or "[" in pattern
 
 
 def match_path(file_path: str, pattern: str) -> bool:
@@ -53,32 +52,16 @@ def match_path(file_path: str, pattern: str) -> bool:
         return False
     else:
         # Prefix matching (original behavior for directories)
-        if expanded_normalized.startswith(expanded_pattern) or expanded_normalized == expanded_pattern.rstrip('/'):
+        if expanded_normalized.startswith(
+            expanded_pattern
+        ) or expanded_normalized == expanded_pattern.rstrip("/"):
             return True
         return False
 
 
 def get_config_path() -> Path:
-    """Get path to patterns.yaml, checking multiple locations."""
-    # 1. Check project hooks directory (installed location)
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
-    if project_dir:
-        project_config = Path(project_dir) / ".claude" / "hooks" / "damage-control" / "patterns.yaml"
-        if project_config.exists():
-            return project_config
-
-    # 2. Check script's own directory (installed location)
-    script_dir = Path(__file__).parent
-    local_config = script_dir / "patterns.yaml"
-    if local_config.exists():
-        return local_config
-
-    # 3. Check skill root directory (development location)
-    skill_root = script_dir.parent.parent / "patterns.yaml"
-    if skill_root.exists():
-        return skill_root
-
-    return local_config  # Default, even if it doesn't exist
+    """Get path to patterns.yaml, located in the same directory as this script."""
+    return Path(__file__).parent / "patterns.yaml"
 
 
 def load_config() -> Dict[str, Any]:
@@ -101,7 +84,7 @@ def check_path(file_path: str, config: Dict[str, Any]) -> Tuple[bool, str]:
         if match_path(file_path, zero_path):
             return True, f"zero-access path {zero_path} (no operations allowed)"
 
-    # Check read-only paths (edits not allowed)
+    # Check read-only paths (writes not allowed)
     for readonly in config.get("readOnlyPaths", []):
         if match_path(file_path, readonly):
             return True, f"read-only path {readonly}"
@@ -112,7 +95,6 @@ def check_path(file_path: str, config: Dict[str, Any]) -> Tuple[bool, str]:
 def main() -> None:
     config = load_config()
 
-    # Read hook input from stdin
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError as e:
@@ -122,20 +104,30 @@ def main() -> None:
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
 
-    # Only check Edit tool
-    if tool_name != "Edit":
+    # Only check write_file tool (Gemini's write tool)
+    if tool_name != "write_file":
+        print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
     file_path = tool_input.get("file_path", "")
     if not file_path:
+        print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-    # Check if file is blocked
     blocked, reason = check_path(file_path, config)
     if blocked:
-        print(f"SECURITY: Blocked edit to {reason}: {file_path}", file=sys.stderr)
-        sys.exit(2)
+        print(f"SECURITY: Blocked write to {reason}: {file_path}", file=sys.stderr)
+        print(
+            json.dumps(
+                {
+                    "decision": "deny",
+                    "reason": f"SECURITY: Blocked write to {reason}: {file_path}",
+                }
+            )
+        )
+        sys.exit(0)
 
+    print(json.dumps({"decision": "allow"}))
     sys.exit(0)
 
 

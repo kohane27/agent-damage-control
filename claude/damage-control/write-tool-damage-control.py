@@ -19,14 +19,14 @@ import sys
 import os
 import fnmatch
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, Tuple
 
 import yaml
 
 
 def is_glob_pattern(pattern: str) -> bool:
     """Check if pattern contains glob wildcards."""
-    return '*' in pattern or '?' in pattern or '[' in pattern
+    return "*" in pattern or "?" in pattern or "[" in pattern
 
 
 def match_path(file_path: str, pattern: str) -> bool:
@@ -53,32 +53,16 @@ def match_path(file_path: str, pattern: str) -> bool:
         return False
     else:
         # Prefix matching (original behavior for directories)
-        if expanded_normalized.startswith(expanded_pattern) or expanded_normalized == expanded_pattern.rstrip('/'):
+        if expanded_normalized.startswith(
+            expanded_pattern
+        ) or expanded_normalized == expanded_pattern.rstrip("/"):
             return True
         return False
 
 
 def get_config_path() -> Path:
-    """Get path to patterns.yaml, checking multiple locations."""
-    # 1. Check project hooks directory (installed location)
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
-    if project_dir:
-        project_config = Path(project_dir) / ".claude" / "hooks" / "damage-control" / "patterns.yaml"
-        if project_config.exists():
-            return project_config
-
-    # 2. Check script's own directory (installed location)
-    script_dir = Path(__file__).parent
-    local_config = script_dir / "patterns.yaml"
-    if local_config.exists():
-        return local_config
-
-    # 3. Check skill root directory (development location)
-    skill_root = script_dir.parent.parent / "patterns.yaml"
-    if skill_root.exists():
-        return skill_root
-
-    return local_config  # Default, even if it doesn't exist
+    """Get path to patterns.yaml, located in the same directory as this script."""
+    return Path(__file__).parent / "patterns.yaml"
 
 
 def load_config() -> Dict[str, Any]:
